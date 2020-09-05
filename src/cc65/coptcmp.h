@@ -49,11 +49,32 @@
 
 
 
-unsigned OptBoolTrans (CodeSeg* S);
+unsigned OptBoolTrans1 (CodeSeg* S);
 /* Try to remove the call to boolean transformer routines where the call is
 ** not really needed.
 */
 
+unsigned OptBoolTrans2 (CodeSeg* S);
+/* Search for and remove bcastax adjacent to bnegax */
+
+unsigned OptBoolTrans3 (CodeSeg* S);
+/* Search for and remove bcastax/bnegax following a boolean transformer.
+** Invert the boolean transformer if it is bnegax to be removed.
+*/
+
+unsigned OptBoolTrans4 (CodeSeg* S);
+/* Replace bcastax/bnegax with
+**
+**      cpx #0
+**      jsr boolne/booleq
+**
+** if A == 0, or replace bcastax/bnegax with
+**
+**      cmp #0
+**      jsr boolne/booleq
+**
+** if X == 0.
+*/
 
 
 /*****************************************************************************/
