@@ -1474,6 +1474,22 @@ void DelEntriesIdx (CodeSeg* S, int Idx, int Count, Collection* Indices)
 
 
 
+void InsertEntryBefore (CodeSeg* S, CodeEntry* E, int Idx, Collection* Indices)
+/* Insert an entry before the index, carrying over any existing labels there,
+** and adjust Indices if necessary.
+*/
+{
+    int OldIdx = Idx;
+
+    CS_InsertEntry (S, E, Idx);
+    AdjustEntryIndices (Indices, Idx, 1);
+
+    /* Move labels if any */
+    CS_MoveLabels (S, CS_GetNextEntry (S, OldIdx), E);
+}
+
+
+
 void RemoveFlaggedRegLoads (CodeSeg* S, LoadRegInfo* LRI, Collection* Indices)
 /* Remove flagged register load insns */
 {
@@ -1508,6 +1524,105 @@ void RemoveFlaggedLoads (CodeSeg* S, LoadInfo* LI, Collection* Indices)
     RemoveFlaggedRegLoads (S, &LI->A, Indices);
     RemoveFlaggedRegLoads (S, &LI->X, Indices);
     RemoveFlaggedRegLoads (S, &LI->Y, Indices);
+}
+
+
+
+static int PHAAt (CodeSeg* S, int Idx, Collection* Indices, int After)
+/* PLA Before or After the specified index Idx depending on the After param */
+{
+    CodeEntry* E;
+    CodeEntry* X;
+    int OldIdx;
+
+    /* Adjust the insertion point if necessary */
+    if (After) {
+        ++Idx;
+    }
+    OldIdx = Idx;
+
+    /* Cannot insert after the last insn */
+    CHECK ((unsigned)Idx < CollCount (&S->Entries));
+
+    /* Get the entry at Idx */
+    E = CS_GetEntry (S, Idx);
+    X = NewCodeEntry (OP65_PHA, AM65_IMP, 0, 0, E->LI);
+    CS_InsertEntry (S, X, Idx++);
+
+    /* Adjust all indices at once */
+    AdjustEntryIndices (Indices, OldIdx, Idx - OldIdx);
+
+    /* Move labels if it was an insertion before Idx */
+    if (!After) {
+        CS_MoveLabels (S, E, CS_GetEntry (S, OldIdx));
+    }
+
+    /* Done */
+    return 1;
+}
+
+
+
+static int PLAAt (CodeSeg* S, int Idx, Collection* Indices, int After)
+/* PLA Before or After the specified index Idx depending on the After param */
+{
+    CodeEntry* E;
+    CodeEntry* X;
+    int OldIdx;
+
+    /* Adjust the insertion point if necessary */
+    if (After) {
+        ++Idx;
+    }
+    OldIdx = Idx;
+
+    /* Get the entry at Idx */
+    E = CS_GetEntry (S, Idx);
+    X = NewCodeEntry (OP65_PLA, AM65_IMP, 0, 0, E->LI);
+    CS_InsertEntry (S, X, Idx++);
+
+    /* Adjust all indices at once */
+    AdjustEntryIndices (Indices, OldIdx, Idx - OldIdx);
+
+    /* Move labels if it was an insertion before Idx */
+    if (!After) {
+        CS_MoveLabels (S, E, CS_GetEntry (S, OldIdx));
+    }
+
+    /* Done */
+    return 1;
+}
+
+
+
+int PHABefore (CodeSeg* S, int Idx, Collection* Indices)
+/* PHA Before the specified index Idx */
+{
+    return PHAAt (S, Idx, Indices, 0);
+}
+
+
+
+int PHAAfter (CodeSeg* S, int Idx, Collection* Indices)
+/* PHA After the specified index Idx */
+{
+    return PHAAt (S, Idx, Indices, 1);
+}
+
+
+
+int PLABefore (CodeSeg* S, int Idx, Collection* Indices)
+/* PLA Before the specified index Idx */
+{
+    return PLAAt (S, Idx, Indices, 0);
+}
+
+
+
+int PLAAfter (CodeSeg* S, int Idx, Collection* Indices)
+/* PLA After the specified index Idx */
+{
+    return PLAAt (S, Idx, Indices, 1);
 }
 
 
@@ -2400,18 +2515,27 @@ int RestoreAXYBefore (CodeSeg* S, BackupInfo* B, int Idx, Collection* Indices)
 
 
 
-int BackupArgAfter (CodeSeg* S, BackupInfo* B, int Idx, const CodeEntry* E, Collection* Indices)
-/* Backup the content of the opc arg of the entry E after the specified index Idx.
+static int BackupArgAt (CodeSeg* S, BackupInfo* B, int Idx, const CodeEntry* E, Collection* Indices, int After)
+/* Backup the content of the opc arg of the entry E at the specified index Idx.
 ** Reg A/Y will be used to transfer the content from a memory location to another
 ** regardless of whether it is in use.
 */
 {
     CodeEntry* X;
-    int OldIdx = Idx;
+    CodeEntry* OldEntry;
+    int OldIdx;
+    int Success = 0;
     unsigned ArgSize;
-    unsigned Use, Chg;
     StrBuf SrcArg;
     StrBuf DstArg;
+
+    /* Adjust the insertion point if necessary */
+    if (After) {
+        ++Idx;
+    } else {
+        OldEntry = CS_GetEntry (S, Idx);
+    }
+    OldIdx = Idx;
 
     SB_Init (&SrcArg);
     SB_Init (&DstArg);
@@ -2431,12 +2555,9 @@ int BackupArgAfter (CodeSeg* S, BackupInfo* B, int Idx, const CodeEntry* E, Coll
             B->Type = BU_IMM | ArgSize;
             B->Imm = E->Num;
 
-            /* Adjust all indices at once */
-            AdjustEntryIndices (Indices, OldIdx + 1, Idx - OldIdx);
-
             /* Done */
-            return 1;
-
+            Success = 1;
+            goto Done;
         }
 
         if (E->Size != 1 && E->AM != AM65_IMP) {
@@ -2446,21 +2567,21 @@ int BackupArgAfter (CodeSeg* S, BackupInfo* B, int Idx, const CodeEntry* E, Coll
             switch (B->Type & BU_TYPE_MASK) {
             case BU_ZP:
                 X = NewCodeEntry (OP65_LDA, E->AM, E->Arg, 0, E->LI);
-                CS_InsertEntry (S, X, ++Idx);
+                CS_InsertEntry (S, X, Idx++);
                 SB_AppendStr (&DstArg, GetZPName (B->Where));
                 SB_Terminate (&DstArg);
                 X = NewCodeEntry (OP65_STA, AM65_ZP, SB_GetConstBuf (&DstArg), 0, E->LI);
-                CS_InsertEntry (S, X, ++Idx);
+                CS_InsertEntry (S, X, Idx++);
                 if (ArgSize == BU_B16) {
                     SB_AppendStr (&SrcArg, E->Arg);
                     SB_AppendStr (&SrcArg, "+1");
                     SB_Terminate (&SrcArg);
                     X = NewCodeEntry (OP65_LDA, E->AM, SB_GetConstBuf (&SrcArg), 0, E->LI);
-                    CS_InsertEntry (S, X, ++Idx);
+                    CS_InsertEntry (S, X, Idx++);
                     SB_AppendStr (&DstArg, "+1");
                     SB_Terminate (&DstArg);
                     X = NewCodeEntry (OP65_STA, AM65_ZP, SB_GetConstBuf (&DstArg), 0, E->LI);
-                    CS_InsertEntry (S, X, ++Idx);
+                    CS_InsertEntry (S, X, Idx++);
                 }
                 break;
 
@@ -2468,37 +2589,37 @@ int BackupArgAfter (CodeSeg* S, BackupInfo* B, int Idx, const CodeEntry* E, Coll
                 CHECK (ArgSize == BU_B8 && B->Where == REG_Y);
                 if (E->AM == AM65_ZP || E->AM == AM65_ABS) {
                     X = NewCodeEntry (OP65_LDY, E->AM, E->Arg, 0, E->LI);
-                    CS_InsertEntry (S, X, ++Idx);
+                    CS_InsertEntry (S, X, Idx++);
                 } else {
                     X = NewCodeEntry (OP65_LDA, E->AM, E->Arg, 0, E->LI);
-                    CS_InsertEntry (S, X, ++Idx);
+                    CS_InsertEntry (S, X, Idx++);
                     X = NewCodeEntry (OP65_TAY, AM65_IMP, 0, 0, E->LI);
-                    CS_InsertEntry (S, X, ++Idx);
+                    CS_InsertEntry (S, X, Idx++);
                 }
                 break;
 
             case BU_SP6502:
                 X = NewCodeEntry (OP65_LDA, E->AM, E->Arg, 0, E->LI);
-                CS_InsertEntry (S, X, ++Idx);
+                CS_InsertEntry (S, X, Idx++);
                 X = NewCodeEntry (OP65_PHA, AM65_IMP, 0, 0, E->LI);
-                CS_InsertEntry (S, X, ++Idx);
+                CS_InsertEntry (S, X, Idx++);
                 if (ArgSize == BU_B16) {
                     SB_AppendStr (&SrcArg, E->Arg);
                     SB_AppendStr (&SrcArg, "+1");
                     SB_Terminate (&SrcArg);
                     X = NewCodeEntry (OP65_LDA, E->AM, SB_GetConstBuf (&SrcArg), 0, E->LI);
-                    CS_InsertEntry (S, X, ++Idx);
+                    CS_InsertEntry (S, X, Idx++);
                     X = NewCodeEntry (OP65_PHA, AM65_IMP, 0, 0, E->LI);
-                    CS_InsertEntry (S, X, ++Idx);
+                    CS_InsertEntry (S, X, Idx++);
                 }
                 break;
 
             case BU_SP:
                 X = NewCodeEntry (OP65_LDA, E->AM, E->Arg, 0, E->LI);
-                CS_InsertEntry (S, X, ++Idx);
+                CS_InsertEntry (S, X, Idx++);
                 if (ArgSize != BU_B16) {
                     X = NewCodeEntry (OP65_JSR, AM65_ABS, "pusha", 0, E->LI);
-                    CS_InsertEntry (S, X, ++Idx);
+                    CS_InsertEntry (S, X, Idx++);
                 } else {
                     SB_AppendStr (&SrcArg, E->Arg);
                     SB_AppendStr (&SrcArg, "+1");
@@ -2506,61 +2627,81 @@ int BackupArgAfter (CodeSeg* S, BackupInfo* B, int Idx, const CodeEntry* E, Coll
                     if ((B->ZPUsage & REG_X) == 0) {
                         if (E->AM == AM65_ZP) {
                             X = NewCodeEntry (OP65_LDX, E->AM, SB_GetConstBuf (&SrcArg), 0, E->LI);
-                            CS_InsertEntry (S, X, ++Idx);
+                            CS_InsertEntry (S, X, Idx++);
                             X = NewCodeEntry (OP65_JSR, AM65_ABS, "pushax", 0, E->LI);
-                            CS_InsertEntry (S, X, ++Idx);
+                            CS_InsertEntry (S, X, Idx++);
                         } else {
                             X = NewCodeEntry (OP65_LDA, E->AM, SB_GetConstBuf (&SrcArg), 0, E->LI);
-                            CS_InsertEntry (S, X, ++Idx);
+                            CS_InsertEntry (S, X, Idx++);
                             X = NewCodeEntry (OP65_TAX, AM65_IMP, 0, 0, E->LI);
-                            CS_InsertEntry (S, X, ++Idx);
+                            CS_InsertEntry (S, X, Idx++);
                             X = NewCodeEntry (OP65_JSR, AM65_ABS, "pushax", 0, E->LI);
-                            CS_InsertEntry (S, X, ++Idx);
+                            CS_InsertEntry (S, X, Idx++);
                         }
                     } else {
                         X = NewCodeEntry (OP65_JSR, AM65_ABS, "pusha", 0, E->LI);
-                        CS_InsertEntry (S, X, ++Idx);
+                        CS_InsertEntry (S, X, Idx++);
                         X = NewCodeEntry (OP65_LDA, AM65_ZP, SB_GetConstBuf (&DstArg), 0, E->LI);
-                        CS_InsertEntry (S, X, ++Idx);
+                        CS_InsertEntry (S, X, Idx++);
                         X = NewCodeEntry (OP65_JSR, AM65_ABS, "pusha", 0, E->LI);
-                        CS_InsertEntry (S, X, ++Idx);
+                        CS_InsertEntry (S, X, Idx++);
                     }
                 }
                 break;
             }
 
-            /* Adjust all indices at once */
-            AdjustEntryIndices (Indices, OldIdx + 1, Idx - OldIdx);
-
             /* Done */
-            return 1;
+            Success = 1;
+            goto Done;
         }
     } else if (E->OPC == OP65_JSR) {
-        /* For function calls we load their arguments instead */
-        GetFuncInfo (E->Arg, &Use, &Chg);
-        if ((Use & ~REG_AXY) == 0) {
-            if (Use == REG_A) {
-                ArgSize = BU_B8;
-                return BackupAAfter (S, B, Idx, Indices);
-            } else if (Use == REG_AX) {
-                ArgSize = BU_B16;
-                return BackupAXAfter (S, B, Idx, Indices);
-            } else if (Use == REG_AXY) {
-                /* This is actually a 16-bit word plus a 8-bit byte */
-                ArgSize = BU_B24;
-                return BackupAXYAfter (S, B, Idx, Indices);
-            }
-
-            /* We don't recognize other usage patterns for now */
-        }
+        /* We don't recognize other usage patterns for now */
     }
 
+Done:
     SB_Done (&SrcArg);
     SB_Done (&DstArg);
+
+    if (Success) {
+        /* Adjust all indices at once */
+        AdjustEntryIndices (Indices, OldIdx, Idx - OldIdx);
+
+        /* Move labels if it was an insertion before Idx */
+        if (!After) {
+            CS_MoveLabels (S, OldEntry, CS_GetEntry (S, OldIdx));
+        }
+
+        /* Done */
+        return 1;
+    }
 
     /* Unable to do backup */
     return 0;
 }
+
+
+
+int BackupArgBefore (CodeSeg* S, BackupInfo* B, int Idx, const CodeEntry* E, Collection* Indices)
+/* Backup the content of the opc arg of the entry E before the specified index Idx.
+** Reg A/Y will be used to transfer the content from a memory location to another
+** regardless of whether it is in use.
+*/
+{
+    return BackupArgAt (S, B, Idx, E, Indices, 0);
+}
+
+
+
+int BackupArgAfter (CodeSeg* S, BackupInfo* B, int Idx, const CodeEntry* E, Collection* Indices)
+/* Backup the content of the opc arg of the entry E after the specified index Idx.
+** Reg A/Y will be used to transfer the content from a memory location to another
+** regardless of whether it is in use.
+*/
+{
+    return BackupArgAt (S, B, Idx, E, Indices, 1);
+}
+
+
 
 static int LoadAAt (CodeSeg* S, int Idx, const LoadRegInfo* LRI, Collection* Indices, int After)
 /* Reload into A the same arg according to LoadRegInfo before or after Idx
@@ -3132,6 +3273,34 @@ int FindRegFirstUseInOpenRange (CodeSeg* S, int First, int Last, unsigned what)
         X = CS_GetEntry (S, First);
         if ((X->Use & what) != 0) {
             return First;
+        }
+    }
+
+    /* Not found */
+    return Last;
+}
+
+
+
+int FindRegFirstFreeInOpenRange (CodeSeg* S, int First, int Last, unsigned what)
+/* Find the first possible spot where the queried ZPs, registers and/or processor
+** states might be available for temporary storage in the range (First, Last).
+** The code block in the range must be basic without any jump backwards.
+** Return the index of the found entry, or Last if not found.
+*/
+{
+    CodeEntry* X;
+    int Prev = First;
+
+    CHECK (Last <= (int)CollCount (&S->Entries));
+
+    while (++First < Last) {
+        X = CS_GetEntry (S, First);
+
+        if ((X->Chg & ~X->Use & what) != 0) {
+            return Prev + 1;
+        } else if ((X->Use & what) != 0) {
+            Prev = First;
         }
     }
 

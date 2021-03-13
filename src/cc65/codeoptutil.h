@@ -321,11 +321,28 @@ void DelEntryIdx (CodeSeg* S, int Idx, Collection* Indices);
 void DelEntriesIdx (CodeSeg* S, int Idx, int Count, Collection* Indices);
 /* Delete entries and adjust Indices if necessary */
 
+void InsertEntryBefore (CodeSeg* S, CodeEntry* E, int Idx, Collection* Indices);
+/* Insert an entry before the index, carrying over any existing labels there,
+** and adjust Indices if necessary.
+*/
+
 void RemoveFlaggedRegLoads (CodeSeg* S, LoadRegInfo* LRI, Collection* Indices);
 /* Remove flagged register load insns */
 
 void RemoveFlaggedLoads (CodeSeg* S, LoadInfo* LI, Collection* Indices);
 /* Remove flagged load insns */
+
+int PHABefore (CodeSeg* S, int Idx, Collection* Indices);
+/* PHA Before the specified index Idx */
+
+int PHAAfter (CodeSeg* S, int Idx, Collection* Indices);
+/* PHA After the specified index Idx */
+
+int PLABefore (CodeSeg* S, int Idx, Collection* Indices);
+/* PLA Before the specified index Idx */
+
+int PLAAfter (CodeSeg* S, int Idx, Collection* Indices);
+/* PLA After the specified index Idx */
 
 int BackupABefore (CodeSeg* S, BackupInfo* B, int Idx, Collection* Indices);
 /* Backup the content of A before the specified index Idx */
@@ -376,6 +393,12 @@ int RestoreAXBefore (CodeSeg* S, BackupInfo* B, int Idx, Collection* Indices);
 int RestoreAXYBefore (CodeSeg* S, BackupInfo* B, int Idx, Collection* Indices);
 /* Restore the content of AXY before the specified index Idx.
 ** This only allows restore from compacted AXY backup for now.
+*/
+
+int BackupArgBefore (CodeSeg* S, BackupInfo* B, int Idx, const CodeEntry* E, Collection* Indices);
+/* Backup the content of the opc arg of the entry E before the specified index Idx.
+** Reg A/Y will be used to transfer the content from a memory location to another
+** regardless of whether it is in use.
 */
 
 int BackupArgAfter (CodeSeg* S, BackupInfo* B, int Idx, const CodeEntry* E, Collection* Indices);
@@ -447,6 +470,13 @@ int FindRegFirstUseInOpenRange (CodeSeg* S, int First, int Last, unsigned what);
 /* Find the first possible spot where the queried ZPs, registers and/or processor
 ** states might be used in the range (First, Last). The code block in the range
 ** must be basic without any jump backwards.
+** Return the index of the found entry, or Last if not found.
+*/
+
+int FindRegFirstFreeInOpenRange (CodeSeg* S, int First, int Last, unsigned what);
+/* Find the first possible spot where the queried ZPs, registers and/or processor
+** states might be available for temporary storage in the range (First, Last).
+** The code block in the range must be basic without any jump backwards.
 ** Return the index of the found entry, or Last if not found.
 */
 
