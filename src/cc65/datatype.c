@@ -171,12 +171,13 @@ static struct StrBuf* GetFullTypeNameWestEast (struct StrBuf* West, struct StrBu
     } else if (IsTypePtr (T)) {
 
         int QualCount = 0;
+        TypeCode AddrsizeQual = (IsTypeFunc (T + 1) ? CodeAddrSizeQualifier () : DataAddrSizeQualifier ());
 
         SB_Printf (&Buf, "*");
 
         /* Add qualifiers */
-        if ((GetQualifier (T) & ~T_QUAL_NEAR) != T_QUAL_NONE) {
-            QualCount = GetQualifierTypeCodeNameBuf (&Buf, T->C, T_QUAL_NEAR);
+        if ((GetQualifier (T) & ~AddrsizeQual) != T_QUAL_NONE) {
+            QualCount = GetQualifierTypeCodeNameBuf (&Buf, T->C, AddrsizeQual);
         }
 
         if (!SB_IsEmpty (West)) {
@@ -194,9 +195,11 @@ static struct StrBuf* GetFullTypeNameWestEast (struct StrBuf* West, struct StrBu
 
     } else {
 
+        TypeCode AddrsizeQual = DataAddrSizeQualifier ();
+
         /* Add qualifiers */
-        if ((GetQualifier (T) & ~T_QUAL_NEAR) != 0) {
-            if (GetQualifierTypeCodeNameBuf (&Buf, T->C, T_QUAL_NEAR) > 0) {
+        if ((GetQualifier (T) & ~AddrsizeQual) != 0) {
+            if (GetQualifierTypeCodeNameBuf (&Buf, T->C, AddrsizeQual) > 0) {
                 SB_AppendChar (&Buf, ' ');
             }
         }
@@ -634,7 +637,7 @@ void PrintFuncSig (FILE* F, const char* Name, Type* T)
     SB_Terminate (&ParamList);
 
     /* Get the function qualifiers */
-    if (GetQualifierTypeCodeNameBuf (&Buf, T->C, T_QUAL_NONE) > 0) {
+    if (GetQualifierTypeCodeNameBuf (&Buf, T->C, CodeAddrSizeQualifier ()) > 0) {
         /* Append a space between the qualifiers and the name */
         SB_AppendChar (&Buf, ' ');
     }
